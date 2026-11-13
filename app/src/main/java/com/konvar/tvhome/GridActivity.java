@@ -531,15 +531,15 @@ public class GridActivity extends Activity {
                 int mine = Trakt.myRating(it);
                 CornerRating corner = CornerRating.on(h.itemView);
                 if (corner != null) corner.set(mine);
-                android.widget.FrameLayout.LayoutParams clp = (android.widget.FrameLayout.LayoutParams) h.check.getLayoutParams();
-                int g = android.view.Gravity.TOP | (mine > 0 ? android.view.Gravity.START : android.view.Gravity.END);
-                if (clp.gravity != g) {
-                    clp.gravity = g;
-                    h.check.setLayoutParams(clp);
-                }
+                h.imdbBadge.bind(it, mine > 0);
             }
             // Next page when the last two rows come into view.
             if (position >= items.size() - 16) loadMore();
+        }
+
+        @Override
+        public void onViewRecycled(@NonNull Holder h) {
+            if (h.imdbBadge != null) h.imdbBadge.clear();
         }
 
         @Override
@@ -553,6 +553,7 @@ public class GridActivity extends Activity {
         final TextView label;
         final TextView subtitle;
         final ImageView check;
+        final ImdbBadge imdbBadge;
 
         Holder(View v) {
             super(v);
@@ -560,6 +561,7 @@ public class GridActivity extends Activity {
             label = v.findViewById(R.id.cardLabel);
             subtitle = v.findViewById(R.id.cardSubtitle);
             check = v.findViewById(R.id.cardCheck);
+            imdbBadge = v.findViewById(R.id.cardImdbBadge);
             if (image != null) image.setClipToOutline(true);
             v.setOnClickListener(x -> {
                 int p = getBindingAdapterPosition();
