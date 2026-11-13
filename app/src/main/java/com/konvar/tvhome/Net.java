@@ -95,19 +95,35 @@ final class Net {
                     while ((n = s.read(buf)) > 0) out.write(buf, 0, n);
                     text = out.toString("UTF-8");
                 }
+            } else {
+                c.disconnect();
             }
             Response res = new Response(code, text);
             res.pageCount = c.getHeaderField("X-Pagination-Page-Count");
             res.itemCount = c.getHeaderField("X-Pagination-Item-Count");
             res.retryAfter = c.getHeaderField("Retry-After");
             return res;
-        } finally {
+        } catch (IOException | RuntimeException e) {
+            // Only a failed connection is torn down. On success the body was read to the end and its stream
+            // closed, which hands the socket back to the pool: the next call to the same host skips the TCP and
+            // TLS handshake (disconnect() would close the socket and force a new handshake every time).
             c.disconnect();
+            throw e;
         }
     }
 
     static byte[] get(String url) throws IOException {
+        return get(url, true);
+    }
+
+    /**
+     * {@code cached} false skips the HTTP response cache: for artwork, which ImageLoader already keeps in its own
+     * disk cache. Writing every poster to both caches doubled the disk writes, and an interrupted download left
+     * the HTTP cache's file open (StrictMode: leaked FileOutputStream).
+     */
+    static byte[] get(String url, boolean cached) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setUseCaches(cached);
         c.setConnectTimeout(8000);
         c.setReadTimeout(12000);
         c.setRequestProperty("User-Agent", "tvhome/3");
@@ -117,8 +133,10 @@ final class Net {
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
             return out.toByteArray();
-        } finally {
+        } catch (IOException | RuntimeException e) {
+            // As in jsonOnce: keep the socket for reuse after a full read, drop it only after a failure.
             c.disconnect();
+            throw e;
         }
     }
 }

@@ -15,8 +15,8 @@ android {
         applicationId = 'com.konvar.tvhome'
         minSdk = 26
         targetSdk = 36
-        versionCode = 40
-        versionName = '0.9.0'
+        versionCode = 41
+        versionName = '0.9.1'
         buildConfigField 'String', 'TRAKT_CLIENT_ID', "\"${localProps.getProperty('TRAKT_CLIENT_ID', '')}\""
         buildConfigField 'String', 'TRAKT_REDIRECT_URI', "\"${localProps.getProperty('TRAKT_REDIRECT_URI', '')}\""
         // Other tracking services, from the same file: Simkl (PIN sign-in) and the Nuvio account (Supabase).
@@ -68,6 +68,9 @@ android {
 
 dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
+    // Installs the baseline profile (src/main/baseline-prof.txt) on sideloaded installs too, so Android compiles
+    // Akari's code ahead of time instead of interpreting it at start-up.
+    implementation 'androidx.profileinstaller:profileinstaller:1.4.1'
     implementation 'com.google.zxing:core:3.5.4'
     testImplementation 'junit:junit:4.13.2'
 }

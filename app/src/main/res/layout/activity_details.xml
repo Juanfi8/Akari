@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/pageRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg">
 
-    <!-- Backdrop on the right; the text column on the left stays on plain background so it reads well. -->
+    <!-- Backdrop on the right; the text column on the left stays on plain background so it reads well. Same box
+         and fades as Home's hero (activity_home.xml), so the picture keeps its size and framing when a title opens. -->
     <FrameLayout
-        android:layout_width="580dp"
-        android:layout_height="400dp"
+        android:layout_width="620dp"
+        android:layout_height="350dp"
         android:layout_gravity="top|end">
 
         <ImageView
@@ -20,13 +22,13 @@
 
         <View
             android:id="@+id/fadeLeft"
-            android:layout_width="300dp"
+            android:layout_width="280dp"
             android:layout_height="match_parent" />
 
         <View
             android:id="@+id/fadeBottom"
             android:layout_width="match_parent"
-            android:layout_height="180dp"
+            android:layout_height="150dp"
             android:layout_gravity="bottom" />
     </FrameLayout>
 
@@ -60,7 +62,7 @@
                 android:textColor="#FFFFFFFF"
                 android:textSize="30sp"
                 android:fontFamily="@font/outfit"
-                android:fontVariationSettings="'wght' 500" />
+                app:weight="500" />
 
             <TextView
                 android:id="@+id/meta"

@@ -562,7 +562,7 @@ public class GridActivity extends Activity {
             subtitle = v.findViewById(R.id.cardSubtitle);
             check = v.findViewById(R.id.cardCheck);
             imdbBadge = v.findViewById(R.id.cardImdbBadge);
-            if (image != null) image.setClipToOutline(true);
+            Look.clipRound(image);
             v.setOnClickListener(x -> {
                 int p = getBindingAdapterPosition();
                 if (p != RecyclerView.NO_POSITION) onClick(items.get(p));

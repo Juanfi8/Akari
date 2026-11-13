@@ -37,13 +37,35 @@ final class ImageLoader {
      * {@code alpha} for transparent artwork such as clear logos, which RGB_565 would put on black.
      */
     static void load(ImageView view, String url, int width, int height, boolean alpha, Runnable done) {
+        load(view, url, width, height, alpha, 0f, done);
+    }
+
+    /**
+     * A landscape card picture with the card's bottom shade already painted into it, once, on the worker thread
+     * (CPU), instead of the GPU blending a gradient over every card on every frame. {@code shade} is the shade's
+     * height as a share of the card's height. The card hides its shade view for such a picture (CardImage).
+     */
+    static void loadShaded(ImageView view, String url, int width, int height, float shade, Runnable done) {
+        load(view, url, width, height, false, shade, done);
+    }
+
+    /** Pictures that carry their own bottom shade (see loadShaded). */
+    private static final java.util.Set<Bitmap> SHADED =
+            java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>()));
+
+    static boolean shaded(Bitmap b) {
+        return b != null && SHADED.contains(b);
+    }
+
+    private static void load(ImageView view, String url, int width, int height, boolean alpha, float shade,
+            Runnable done) {
         view.setTag(R.id.image_url, url);
         if (url == null || url.isEmpty()) {
             view.setImageDrawable(null);
             if (done != null) done.run();
             return;
         }
-        String key = url + '@' + width + (alpha ? "a" : "");
+        String key = url + '@' + width + (alpha ? "a" : "") + (shade > 0f ? "s" + height : "");
         Bitmap hit = CACHE.get(key);
         if (hit != null) {
             view.setImageBitmap(hit);
@@ -65,6 +87,7 @@ final class ImageLoader {
             Bitmap bmp = null;
             try {
                 bmp = decode(read(view.getContext(), url), width, height, alpha);
+                if (bmp != null && shade > 0f) bmp = shade(bmp, width, height, shade);
             } catch (IOException | RuntimeException | OutOfMemoryError e) {
                 android.util.Log.w("TvHomeImages", "failed " + url + ": " + e);
                 if (e instanceof java.io.FileNotFoundException) FAILED.put(url, android.os.SystemClock.elapsedRealtime());
@@ -108,7 +131,7 @@ final class ImageLoader {
                 f.setLastModified(System.currentTimeMillis());
                 return java.nio.file.Files.readAllBytes(f.toPath());
             }
-            byte[] data = Net.get(url);
+            byte[] data = Net.get(url, false);
             try {
                 java.io.File tmp = new java.io.File(f.getPath() + ".tmp");
                 java.nio.file.Files.write(tmp.toPath(), data);
@@ -132,16 +155,27 @@ final class ImageLoader {
     private static final long DISK_LIMIT = 1024L * 1024 * 1024;
     private static int writes;
 
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
+    private static volatile java.io.File imageDir;
+
     private static java.io.File diskFile(android.content.Context c, String url) {
-        java.io.File dir = new java.io.File(c.getFilesDir(), "images");
-        if (!dir.exists()) dir.mkdirs();
+        java.io.File dir = imageDir;
+        if (dir == null) {
+            dir = new java.io.File(c.getFilesDir(), "images");
+            if (!dir.exists()) dir.mkdirs();
+            imageDir = dir;
+        }
         String name;
         try {
             byte[] h = java.security.MessageDigest.getInstance("SHA-1")
                     .digest(url.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : h) sb.append(String.format("%02x", b));
-            name = sb.toString();
+            // Hex by hand: String.format per byte was 20 formatter objects for every image looked up.
+            char[] out = new char[h.length * 2];
+            for (int i = 0; i < h.length; i++) {
+                out[i * 2] = HEX[(h[i] >> 4) & 0xF];
+                out[i * 2 + 1] = HEX[h[i] & 0xF];
+            }
+            name = new String(out);
         } catch (java.security.NoSuchAlgorithmException e) {
             name = Integer.toHexString(url.hashCode());
         }
@@ -173,14 +207,46 @@ final class ImageLoader {
         o.inJustDecodeBounds = false;
         o.inSampleSize = sample;
         o.inPreferredConfig = alpha ? Bitmap.Config.ARGB_8888 : Bitmap.Config.RGB_565;
-        Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length, o);
-        if (b != null && b.getWidth() > width * 1.25f) {
-            int h = Math.max(1, Math.round(b.getHeight() * (width / (float) b.getWidth())));
-            Bitmap scaled = Bitmap.createScaledBitmap(b, width, h, true);
-            if (scaled != b) b.recycle();
-            b = scaled;
+        int sampledWidth = (o.outWidth + sample - 1) / sample;
+        if (sampledWidth > width * 1.25f) {
+            // Scale to the shown width inside the decoder: one bitmap, instead of a second scaled copy made
+            // after a full decode (twice the memory for a moment and more garbage to collect while scrolling).
+            o.inScaled = true;
+            o.inDensity = sampledWidth;
+            o.inTargetDensity = width;
         }
+        Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length, o);
+        // The density trick above tags the bitmap with inTargetDensity; give it the screen's density back, as a
+        // plain decode has, so its drawable size (used to fit clear logos) is unchanged.
+        if (b != null && o.inScaled && o.inDensity > 0) {
+            b.setDensity(android.content.res.Resources.getSystem().getDisplayMetrics().densityDpi);
+        }
+        // Upload to the GPU now, on this worker thread, instead of on the first frame that draws it.
+        if (b != null) b.prepareToDraw();
         return b;
+    }
+
+    /**
+     * Paints the card shade (card_shade.xml: #D9000000 at the bottom fading to clear) into the part of {@code b}
+     * that a centre-cropped {@code w}×{@code h} card shows, over its bottom {@code share} of that height.
+     */
+    private static Bitmap shade(Bitmap b, int w, int h, float share) {
+        Bitmap m = b.isMutable() ? b : b.copy(b.getConfig(), true);
+        if (m == null) return b;
+        if (m != b) b.recycle();
+        float bw = m.getWidth(), bh = m.getHeight();
+        // Centre crop: the visible height of the bitmap for the card's shape, and where it ends.
+        float visible = Math.min(bh, bw * h / (float) w);
+        float bottom = (bh + visible) / 2f;
+        float top = bottom - visible * share;
+        android.graphics.Paint p = new android.graphics.Paint();
+        p.setShader(new android.graphics.LinearGradient(0, bottom, 0, top, 0xD9000000, 0x00000000,
+                android.graphics.Shader.TileMode.CLAMP));
+        p.setDither(true);
+        new android.graphics.Canvas(m).drawRect(0, top, bw, bottom, p);
+        m.prepareToDraw();
+        SHADED.add(m);
+        return m;
     }
 
     /** A dark tint of the image's average colour, for the ambient background. */
